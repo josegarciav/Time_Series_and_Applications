@@ -1,0 +1,238 @@
+---
+title: "MMA515 Series de Tiempo"
+author: "Jose Garcia"
+date: "06/01/2022"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    df_print: paged
+    section_divs: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Práctica 2
+
+### 1. Descarga los datos de Bitcoin (BTC-USD) y Ethereum (ETH-USD) para las fechas 2016-01-01 al 2021-12-31 utilizando la función “getSymbols” del paquete quantmod.
+
+```{r a, warning=F, message=F}
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(urca)
+library(tseries)
+library(quantmod)
+library(xts)
+library(vars)
+library(lmtest)
+library(forecast)
+
+getSymbols('BTC-USD', from="2018-01-01", to= "2021-12-31", src="yahoo")
+getSymbols('ETH-USD', from="2018-01-01", to= "2021-12-31", src="yahoo")
+
+```
+
+
+### 2. Grafica estos datos
+
+
+```{r}
+plot(`BTC-USD`, main="BTC-USD", type = 'l', col = 'blue')
+plot(`ETH-USD`, main="ETH-USD", type = 'l', col = 'red')
+
+
+
+```
+
+
+
+### 3. Determina si estas series son estacionarias realizando las pruebas y gráficos de lugar. Transforma en caso de ser necesario.
+
+A primera vista las series no son estacionarias. Pasándolo a dataframe para ver los tests:
+
+```{r}
+BTC<- data.frame(date=index(`BTC-USD`), coredata(`BTC-USD`))
+ETH<- data.frame(date=index(`ETH-USD`), coredata(`ETH-USD`))
+
+```
+
+
+
+```{r}
+#Test de Dickey-Fuller Aumentado
+
+set.seed(123)
+
+prueba_btc <- ur.df(BTC$BTC.USD.Adjusted, type="none", lags = 1) # un solo lag y sin intercepto ni tendencia
+summary(prueba_btc)
+
+```
+
+BTC no es estacionaria porque z.lag.1 es cercano de 0.
+
+```{r}
+prueba_eth <- ur.df(ETH$ETH.USD.Adjusted, type="none", lags = 1) # un solo lag y sin intercepto ni tendencia
+summary(prueba_eth)
+```
+
+ETH tampoco es estacionaria debido al z.lag.1 cercano a 0.
+
+### 4. Estima un VAR(p) con BTC y ETH
+
+Modelo VAR de ETH
+
+```{r}
+varETH <- VAR(ETH[,c( "ETH.USD.Volume", "ETH.USD.Adjusted")], p=12, type="const")
+
+varETH
+```
+
+Modelo VAR de BTC
+
+
+```{r}
+varBTC <- VAR(BTC[,c("BTC.USD.Volume", "BTC.USD.Adjusted")], p = 12, type="const")
+
+varBTC
+
+```
+
+
+### 5. Verifica si BTC Granger causa a ETH
+
+Aquí el null hypothesis sería que los valores de ETH han de predecir los de BTC en el futuro. Bajé la dimensionalidad de la data en ambos casos (>2018) para que sean equivalentes.
+
+```{r}
+grangertest(BTC$BTC.USD.Adjusted ~ ETH$ETH.USD.Adjusted, order = 3)
+
+```
+
+Se rechaza la hipótesis, debido a que el p value es menor a 0.05.
+
+
+### 6. Grafica los errores y verifica si parecen ruido blanco
+
+```{r}
+acf(residuals(varBTC))
+```
+
+
+```{r}
+acf(residuals(varETH)) 
+```
+
+
+El gráfico de los errores de ETH parece tener más ruido blanco por las bandas que se salen que tienen más prevalencia que en el gráfico de BTC.
+
+
+### 7. ¿Están correlacionados los errores e1_t y e2_t?
+
+```{r}
+summary(varBTC)
+
+```
+
+Aquí en la matriz de covarianza como las no diagonales son distintas de cero, decimos que los errores están correlacionados.
+
+
+
+```{r}
+summary(varETH)
+```
+
+
+
+
+Para el caso de ETH, igual, los errores están correlacionados al ser distintos de cero.
+
+### 8. Estima un SVAR(p) con BTC y ETH donde ETH es la variable más endógena.
+
+Para configurar la matriz para los coeficientes contemporáneos, necesitamos hacer uso de una matriz que tenga las dimensiones adecuadas. Esto se logra fácilmente con la ayuda de la matriz de diagnóstico. Para codificar esto de manera adecuada, necesitamos insertar ceros para las restricciones y NA en todos aquellos lugares que no pertenezcan a una restricción. Por eso,
+
+```{r}
+a.mat <- diag(4)
+diag(a.mat) <- NA
+a.mat[2, 1] <- NA
+a.mat[3, 1] <- NA
+a.mat[3, 2] <- NA
+a.mat[4, 1] <- NA
+a.mat[4, 2] <- NA
+a.mat[4, 3] <- NA
+print(a.mat)
+
+b.mat <- diag(4)
+diag(b.mat) <- NA
+print(b.mat)
+
+```
+
+```{r}
+varEnd <- VAR(cbind(ETH[,c( "ETH.USD.Volume", "ETH.USD.Adjusted")], BTC[,c("BTC.USD.Volume", "BTC.USD.Adjusted")]), p = 5, type="const")
+varEnd
+#roots(varEnd) # Es estacionario el VAR porque son menores que 1 los eigenvalues
+```
+
+
+```{r, warning=F, message=F}
+moodelosvarBTC <- SVAR(varEnd, Amat = a.mat, Bmat = b.mat, hessian = TRUE)
+
+moodelosvarBTC
+```
+
+
+
+### 9. ¿Cuántas restricciones debemos realizar para estimar el SVAR en la pregunta 5?
+
+La identificación del SVAR se trata de imponer restricciones a la matriz A. Una sola restricción, como son 2 variables.
+
+### 10. Calcula las funciones de impulso respuesta para tu modelo. Grafícalas.
+
+```{r, warning=F, message=F}
+impres<- irf(moodelosvarBTC, impulse = "ETH.USD.Adjusted", response = "BTC.USD.Adjusted", ortho = F, n.ahead = 8)
+plot(impres)
+
+```
+
+
+
+### 11. ¿Cuáles otras variables incluirías en tu análisis porque consideras que podrían explicar el movimiento de las crypto-monedas? ¿Por qué?
+
+He de incluir la variable ETH.USD.High, y creo que explicaría mejor los valores ajustados porque se vería que tanto depende el punto más alto del día de los precios de la criptomoneda en el precio ajustado final.
+
+
+### 12. Incluye al menos otra variable en tu SVAR. Ordena tu matriz A y estímala.
+
+
+```{r, warning=F, message=F}
+a.mat <- diag(5)
+diag(a.mat) <- NA
+a.mat[2, 1] <- NA
+a.mat[3, 1] <- NA
+a.mat[3, 2] <- NA
+a.mat[4, 1] <- NA
+a.mat[4, 2] <- NA
+a.mat[4, 3] <- NA
+a.mat[5, 1] <- NA
+a.mat[5, 2] <- NA
+a.mat[5, 3] <- NA
+a.mat[5, 4] <- NA
+print(a.mat)
+
+b.mat <- diag(5)
+diag(b.mat) <- NA
+print(b.mat)
+varEnd2 <- VAR(cbind(ETH[,c("ETH.USD.High", "ETH.USD.Volume", "ETH.USD.Adjusted")], BTC[,c("BTC.USD.Volume", "BTC.USD.Adjusted")]), p = 5, type="const")
+moodelosvarBTC2 <- SVAR(varEnd2, Amat = a.mat, Bmat = b.mat, hessian = TRUE)
+moodelosvarBTC2
+impres2<- irf(moodelosvarBTC2, impulse = "ETH.USD.Adjusted", response = "BTC.USD.Adjusted", ortho = F, n.ahead = 8)
+plot(impres2) # Define una relacion que va a la baja
+```
+
+
+

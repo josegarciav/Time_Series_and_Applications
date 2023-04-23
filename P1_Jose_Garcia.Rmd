@@ -1,0 +1,257 @@
+---
+title: "MMA515 Series de Tiempo"
+author: "Jose Garcia"
+date: "12/05/2021"
+output:
+  html_document:
+    toc: TRUE #table of contents true
+    toc_depth: 3  #up to 3 depths of headings (specified by #, ## and ###)
+    # toc_float: TRUE #toc a la izquierda de la pantalla
+    #number_sections: TRUE #number sections at each table header
+    #theme: cosmo #tema
+    df_print: paged #para hacer los dataframes desplegables
+    section_divs: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Práctica 1
+
+### 1. El Índice de Temperatura Global (ITG) compilado por la NASA muestra el cambio anual en la temperatura de la superficie de la tierra con relación al promedio de los años 1951-1980.
+
+*a. Importación de la data*
+
+```{r a, warning=F}
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(urca)
+library(tseries)
+
+data <- read_excel('global_temp.csv.xlsx') %>%
+  glimpse()
+  
+```
+
+*b. Grafica el ITG. ¿A simple vista, es estacionaria esta serie? ¿Por qué?*
+
+```{r b}
+plot(data$year, data$global_temp_index, type = 'l', col = 'blue', main = 'Índice de Temperatura Global (ITG)')
+```
+
+
+A simple vista, se puede inferir que la serie de tiempo no es estacionaria, debido a que no presenta una variación constante a través del tiempo, sino que presenta una tendencia hacia el alza. Es decir, existe una tendencia exponencial en la serie observada.
+
+
+*c. Grafica la función de autocorrelación. Interpreta sus resultados.*
+
+Para graficar la función de autocorrelación (FAC), es importante mencionar que cuando $\phi$ es negativo, la FAC decae de manera exponencial, pero el signo de autocorrelaciones fluctuan entre positivo y negativo.
+
+
+```{r}
+# Diferenciamos
+data1 <- data %>%
+  mutate(total=c(NA,diff(global_temp_index))) %>% filter(complete.cases(.))
+
+data1 %>%
+  ggplot(aes(x=year,y=total)) +
+  geom_line(color="red") +
+  theme_classic()
+
+# Vemos el FAC y FACP. Se nota muy claramente la estacionalidad.
+acf(data$global_temp_index) # El phi es negativo antes de diferenciar, decae exponencialmente
+acf(data1$total) # Luego de diferenciar la serie es estacionaria
+
+```
+
+
+Se observa que la autocorrelación en el periodo cero es igual a 1 y para los posteriores puntos es diferente de 0 por lo que hay presencia de choques que podrían sesgar los estimadores de los coeficientes.
+
+
+*d. ¿Crees que un modelo AR(1) podría ser un buen modelo para esta serie? ¿Por qué?*
+
+Sí, porque como ya vimos la serie es estacionaria solo luego de aplicar la diferenciación. Casi que por definición, es necesario evaluar series diferenciadas cuando tenemos estacionalidad. También, observando el gráfico de la función de autocorrelación se puede ver que existe una alta dependencia ya que las bandas están siempre por encima de las líneas azules.
+
+
+*e. ¿Cuáles tests podrías utilizar para verificar si esta serie es estacionaria o no?*
+
+Test de KPSS (sin tendencia), Test de Kwiatkowski-Phillips-Schidt-Shin (KPSS), Dickey-Fuller, Test de Dickey-Fuller Aumentado, entre otros.
+
+
+*f. Escoge uno de estos tests y aplícalo al ITG. ¿Cuáles son los resultados?*
+
+```{r f}
+#Test de Dickey-Fuller Aumentado
+
+set.seed(123)
+
+prueba_adf <- ur.df(data$global_temp_index, type="none", lags = 1) # un solo lag y sin intercepto ni tendencia
+summary(prueba_adf)
+
+```
+
+La serie no es estacionaria porque el z.lag.1 es lejana de cero, y el test-statistic es menor que 1 por lo que no se puede rechazar la hipótesis nula.
+
+
+*g. Suaviza la serie del ITG mediante el método de lowess y grafica tanto la serie original como la suavizada en el mismo gráfico.*
+
+```{r g}
+
+lowess_model1 <- lowess(data, f=2/3) #Suavizamiento 1
+lowess_model2 <- lowess(data, f=1/10) #Suavizamiento 2
+
+```
+
+
+```{r}
+plot(data$year, data$global_temp_index, main='Índice de Temperatura Global', col=2)
+lines(lowess_model1, col=1)
+lines(lowess_model2, col=5)
+legend(x = "bottomright", legend=c("Serie original","f=2/3","f=1/10"), col=c(2,1,5),lwd=2)
+
+```
+
+
+*h. Extrae el componente aleatorio y grafícalo. A simple vista, ¿es estacionario? ¿Por qué?*
+
+
+```{r h}
+arima1 <- arima(data$global_temp_index, 
+                order = c(1,0,0), # componento no estacional
+                seasonal = list(order=c(1,0,0), # componente estacional
+                                period=12))
+plot(resid(arima1))
+```
+
+A simple vista es estacionario debido a que mantiene una media constante a través del tiempo.
+
+*i. Ahora diferencia la serie del ITG. A simple vista, ¿es estacionaria esta serie? ¿Por qué?*
+
+```{r i}
+data1 <- data %>%
+  mutate(total=c(NA,diff(global_temp_index))) %>% filter(complete.cases(.))
+data1 %>% ggplot(aes(x=year,y=total)) + geom_line(color="red") + theme_classic() + geom_smooth() #Serie diferenciada
+
+```
+
+A simple vista es estacionaria, debido a que presenta la misma tendencia a lo largo del tiempo. Tendríamos una línea fija (casi recta) con el geom_smooth() (como se muestra).
+
+*j. Explica las ventajas y desventajas de diferenciar una serie vs descomponerla.*
+
+La diferenciación consiste en restarle a cada valor de la serie, el valor anterior. Una ventaja de diferenciar una serie es que no se tiene que estimar ningun parámetro. Una desventaja de diferenciar es que no tenemos estimaciones del componente estocástico de la serie de tiempo, sino que tenemos la diferencia de la serie. Esto es una desventaja debido a que el componente estocástico y la diferenciación no siempre son iguales.
+
+Otra ventaja de diferenciar sobre hacer el detrending es que no necesitamos conocer la especificación exacta de la tendencia, por lo que si el objetivo principal es convertir la data a estacionaria, diferenciar la serie no sólo es más eficiente, sino que también nos evita problemas de pobre especificación del modelo. Esta es la razón con más peso para diferenciar sobre descomponer una serie. 
+
+
+### 2. Descarga la serie correspondiente a las tasas de interés a 3 meses de los EEUU a través del enlace
+
+*a. Grafica esta serie en R. A simple vista, ¿es estacionaria? ¿Por qué?*
+
+```{r}
+
+tasas_interes_data <- read.csv('DTB3.csv') %>%
+  glimpse()
+
+plot(tasas_interes_data$DTB3, col='red', main = 'Plot inicial')
+
+```
+
+No es estacionaria, porque presenta variaciones a lo largo del tiempo que hacen que la serie no muestre una variación constante. 
+
+*b. Corre la siguiente regresión simple e interpreta el parámetro b, donde t representa el tiempo:*
+
+$$i_t = a+bt + e_t$$
+
+
+```{r}
+tasas_interes_data$t <- 1:nrow(tasas_interes_data) #tiempo = indice
+modelo_regresion_lineal <- lm(DTB3 ~ t, data=tasas_interes_data)
+summary(modelo_regresion_lineal)
+
+```
+
+
+```{r}
+par(mfrow=c(2,2))
+plot(modelo_regresion_lineal)
+```
+
+Esta regresión lineal nos muestra que la tasa de interés varía en -1.092e-03 (-0.001092) por cada mes que pasa.
+
+*c. Grafica la FAC de la serie. Interpreta los resultados.*
+
+```{r}
+acf(tasas_interes_data$DTB3)
+
+```
+
+Aquí vemos que la autocorrelación es igual a 1 en el periodo 0, y diferente de 0 en los periodos posteriores, por lo que se puede decir que hay choques que pueden estar sesgando los estimadores de los coeficientes. 
+
+
+*d. Aplica el test KPSS y verifica si la serie es o no estacionaria.*
+
+```{r}
+test_kpss <- kpss.test(tasas_interes_data$DTB3, null="Level")
+test_kpss
+```
+
+Aquí como tenemos un p-value igual a 0.01, rechazamos la hipótesis nula y concluimos que la serie no es estacionaria en "levels".
+
+
+*e. Selecciona el mejor modelo ARIMA que se encaja a la data. ¿Cuál es el orden del modelo?*
+
+```{r}
+#par(mfrow=c(2,2))
+# Probamos entonces varios candidatos
+# ARIMA(1,0,0)x(1,0,0)12
+arima1 <- arima(tasas_interes_data$DTB3, 
+                order = c(1,0,0), # componento no estacional
+                seasonal = list(order=c(1,0,0), # componente estacional
+                                period=12))
+plot(resid(arima1)) #aqui los residuales no son constantes
+acf(resid(arima1))
+pacf(resid(arima1))
+
+```
+
+```{r}
+# ARIMA(0,0,1)x(1,0,0)12
+arima2 <- arima(tasas_interes_data$DTB3, order = c(0,0,1), seasonal = list(order=c(0,0,0),period=12))
+plot(resid(arima2))
+acf(resid(arima2))
+pacf(resid(arima2))
+
+```
+
+```{r}
+# ARIMA(1,0,1)x(1,0,0)12
+arima3 <- arima(tasas_interes_data$DTB3, order = c(1,0,1), seasonal = list(order=c(1,0,0),period=12))
+plot(resid(arima3))
+acf(resid(arima3))
+pacf(resid(arima3))
+```
+
+
+```{r}
+# ARIMA(0,0,0)x(1,0,0)12
+arima4 <- arima(tasas_interes_data$DTB3, order = c(0,0,0), seasonal = list(order=c(1,0,0),period=12))
+plot(resid(arima4))
+acf(resid(arima4))
+pacf(resid(arima4))
+```
+
+
+```{r}
+# ARIMA(1,0,1)x(1,0,1)12
+arima5 <- arima(tasas_interes_data$DTB3, order = c(1,0,1), seasonal = list(order=c(1,0,1),period=12))
+plot(resid(arima5))
+acf(resid(arima5))
+pacf(resid(arima5))
+```
+
+El orden del modelo que mejor se ajusta sería el de orden 5 (arima5), ya que el plot de la autocorrelación es la que mejor se ajusta a las bandas, luego de que en el tiempo cero la autocorrelación daba 1.
+
+
+

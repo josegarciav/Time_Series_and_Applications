@@ -1,0 +1,382 @@
+---
+title: "MMA515 Series de Tiempo"
+author: "Jose Garcia"
+date: "06/01/2022"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    df_print: paged
+    section_divs: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Examen Final
+
+Librerias a usar
+```{r a, warning=F, message=F, echo=T}
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(urca)
+library(tseries)
+library(quantmod)
+library(xts)
+library(vars)
+library(lmtest)
+library(forecast)
+library(dlm)
+library(CausalImpact)
+
+```
+
+
+
+### 1. Considera el modelo de nivel local donde $y_t$ es el crecimiento del IMAE observado (y sujeto a errores de medicion) en el periodo $t$, y $μ_t$ es el crecimiento de la actividad economica efectiva (no observable) en el periodo $t$.
+
+```{r}
+#Importacion de los datos
+data <- read_excel('imae.xlsx', sheet = "modificado") %>%
+  glimpse()
+```
+
+(a) Identifica la ecuacion de estados
+
+
+$$ \Delta IMAE_t = \Delta ActEcn_t + \epsilon_t, \hspace{0.5mm} \epsilon_t \sim iid. N(0,V)  $$
+
+
+(b) Identifica la ecuacion de observaciones
+
+
+$$ \Delta ActEcn_{t+1} = \Delta ActEcn_t + w_t, \hspace{0.5mm} w_t \sim iid. N(0, \ln V)  $$
+
+
+
+
+
+(c) ¿Cuales son los parametros desconocidos del modelo?
+
+```{r}
+
+# Definimos un DLM de orden 1
+buildFun <- function(x){
+dlmModPoly(1,dV=exp(x[1]),dW=exp(x[2])) 
+}
+
+# Estimamos los desconocidos por MLE
+fit <- dlmMLE(data$IMAE,
+              parm = c(0,0), 
+              build = buildFun)
+
+fit # Par
+# W_t y mu_t
+```
+
+
+
+(d) Estima por MLE los parametros desconocidos del modelo.
+
+```{r}
+# Construimos nuestro modelo
+dlmIMAE <- buildFun(fit$par)
+dlmIMAE
+
+```
+
+
+
+(e) Estima $μ_t$ utilizando el Filtro de Kalman
+
+```{r}
+# Aplicamos el filtro de kalman
+# The functions applies Kalman filter to compute filtered values of the state vectors, together with their variance/covariance matrices.
+IMAEFilt <- dlmFilter(data$IMAE, dlmIMAE)
+# IMAEFilt$y <- append(IMAEFilt$y, min(IMAEFilt$y)) # Las dimensiones no se correspondian
+
+m <- ts(1:179, start=2008, freq=12)
+
+```
+
+
+(f) Grafica $y_t$ y $\hat{μ_t}$ en un mismo grafico.
+
+```{r}
+par(mfrow=c(2,2))
+plot(data$IMAE - m, type='l', col='seagreen', main = 'IMAE', xlab ="y" , ylab="mu")
+plot(IMAEFilt$m[-1] - m, type='l', col='red', main = 'Prediccion Mu Ajustada', xlab ="y" , ylab="mu")
+plot(abs(data$IMAE - IMAEFilt$m[-1]), type='l', col='blue', main = 'Diferencia', xlab ="y" , ylab="mu")
+```
+
+
+
+### 2. Respecto al modelo de regresion lineal
+
+(a) Explica los supuestos del modelo
+
+   * 1.Linealidad
+        * La linealidad se refiere a cómo son introducidos los parámetros y el error, no a la relación entre las variables. La ecuación de regresión, posee una forma particular que responde a una recta. A partir de ello, se dan como característica que la variable dependiente constituye la suma de un conjunto de elementos que son: el origen de la recta, una combinación lineal de variables independientes o predictoras y los residuos.
+   * 2.Rango completo
+        * Dice que no existe relación lineal exacta entre ninguna de las variables independientes. El incumplimiento de este supuesto da origen a colinealidad o multicolinealidad en dependencia de las variables que afecte.
+   * 3.Exogeneidad de las variables independientes
+        * Este supuesto nos dice que el valor esperado de cada error en cada período $t$, no está relacionado con ningúna variable $x_i$ en ningún período.
+   * 4.Homocedasticidad
+        * Para cada valor de la variable independiente (o combinación de sus valores), la varianza de los residuos es constante.
+   * 5.No correlación serial
+        * Condicional en $X$, los errores de dos períodos distintos no tienen correlación. Cuando este supuesto no se cumple, los errores $u_t$ sufren de correlación serial, o autocorrelación.
+   * 6.Normalidad
+        * Este supuesto nos dice que los errores $u_t$ son independientes de $X$ y son independientes e identicamente distribuídos normalmente.
+
+
+(b) Si quisieramos hacer inferencia sobre el impacto de una variable exogena en la dependiente, ¿cuales de los supuestos se deben mantener?
+
+Se deben mantener los supuestos 1-3.
+
+
+(c) Si quisieramos solo proyectar nuestra variable de interes, cuales supuestos se deben mantener?
+
+Se deben mantener los supuestos 1-6.
+
+
+(d) ¿Cuales criterios podria utilizar para comparar dos modelos distintos?
+
+El $R^2$, MSE vs flexibility (bondad de ajuste del modelo).
+
+
+(e) ¿Cual tipo de test podria hacer para determinar si una variable es significativa?
+
+
+Criterio de información de Akaike (AIC) (penaliza la incorporacion de cada nueva variable), criterio de información bayesiano (BIC). Este ultimo escoge modelos con variables que los hacen mas parsimoniosos (pequenos).
+
+
+### 3. Digamos que la principal cerveceria del pais, Cerveceria INTEC, te ha contratado para hacer un estudio sobre el impacto de una futura campana de marketing en las ventas de su cerveza signature, Cerveza MMA.
+
+(a) ¿En adicion a los datos mensuales historicos sobre el gasto en marketing y las ventas de la Cerveza MMA, ¿cuales otras variables considerarias en tu estudio?
+
+Se pudieran integrar variables como total de gastos en investigacion y desarrollo, gastos por consultoria, gastos por financiamiento intragrupo, entre otros gastos similares que pudieran influir positivamente en la proyeccion del ingreso total. Por ejemplo, se pudiera integrar tambien la media de inversion en investigacion y desarrollo de las demas empresas que pertenecen al mismo sector, para ver si un aumento exclusivo en este parametro influye negativamente en el efecto que pudiera tener un aumento en el gasto por marketing de nuestra nueva cerveza a ser lanzada. Esto seria un choque exogeno a la economia interna de la empresa, ya que queda fuera de nuestro control.
+
+
+(b) ¿Cual(es) modelos considerarias y por que?
+
+   * Modelo VAR Estructural (SVAR)
+        * Porque es una forma matematicamente intuitiva de determinar el impacto que produce un choque exogeno en una variable en otra dado que los errores de las series estan correlacionados y no se puede aislar un efecto singular sobre alguna de ellas.
+   * Modelo Factor-Augmented VAR (FAVAR)
+        * Se puede decir que este tipo de modelo puede ser util, si al final decidimos utilizar variables que quiza no esten directamente relacionadas con lo que se pretende predecir (variables agrupadas a un nivel latente). Aqui seria necesario reducir la dimensionalidad de nuestra matriz de observaciones mediante tecnicas como SVD o PCA.
+
+
+(c) ¿Cuales criterios utilizarias para escoger el mejor modelo?
+
+   * Modelo VAR Estructural (SVAR)
+        * Si el vector promedio de proyeccion es menor para la variable de mayor interes. Tambien se pueden aplicar tests de normalidad, como el Jarque-Bera y el Kolmogorov-Smirnov, donde se toma el valor de p-value mayor, donde si este es mayor a 1% se dice que no se puede rechazar la hipotesis nula de no normalidad. 
+   * Modelo Factor-Augmented VAR (FAVAR)
+        * Si el VAR calculado con $F_t$ y $Y_t$ presenta un error promedio de proyeccion menor, visto para cada variable. Tambien se pueden aplicar tests de normalidad, como el Jarque-Bera y el Kolmogorov-Smirnov, donde se toma el valor de p-value mayor, donde si este es mayor a 1% se dice que no se puede rechazar la hipotesis nula. 
+
+
+
+### 4. Explica los problemas que implicaria trabajar con series no estacionarias.
+
+Si una distribución no es estacionaria, entonces se vuelve difícil de modelar. Los algoritmos construyen relaciones entre entradas y salidas al estimar los parámetros centrales de las distribuciones subyacentes.
+
+Cuando todos estos parámetros dependen del tiempo, los algoritmos y modelos enfrentarán valores diferentes en cada momento. Y si la serie temporal es lo suficientemente granular (como frecuencias de minutos o segundos), los modelos pueden incluso terminar con más parámetros que los datos reales.
+
+Este tipo de relación entre variables de entradas y salidas comprometerá seriamente la función de decisión de cualquier modelo. Si la relación sigue cambiando a lo largo del tiempo, los modelos terminan utilizando una relación obsoleta o que no contribuye a su poder predictivo.
+
+Por lo tanto, se debe dedicar una cierta cantidad de tiempo a detectar la no estacionariedad en las series de tiempo que estemos trabajando y eliminar sus efectos durante el proceso de trabajo.
+
+En el mundo de las estadísticas, existen varias pruebas bajo la etiqueta de pruebas de raíz unitaria. La prueba de Dickey-Fuller aumentada puede ser la más popular, y ya vimos cómo usarla para detectar caminatas aleatorias en mi última publicación.
+
+En pocas palabras, aquí están las hipótesis nula y alternativa de esta prueba:
+
+   * La hipótesis nula: la distribución es no estacionaria, dependiente del tiempo (tiene raíz unitaria).
+   * La hipótesis alternativa: la distribución es estacionaria, no dependiente del tiempo (no se puede representar mediante una raíz unitaria).
+
+El p value determina el resultado de la prueba. Si es menor que un umbral crítico de 0,05 o 0,01, rechazamos la hipótesis nula y concluimos que la serie es estacionaria. De lo contrario, no podemos rechazar la nula y concluir que la serie no es estacionaria.
+
+El uso de datos de series de tiempo no estacionarios en modelos financieros produce resultados poco confiables y espurios y conduce a una mala comprensión y pronóstico.
+
+### 5. El petroleo es un commodity de gran importancia para la economia global, principalmente por su rol en al generacion de energia electrica. El petroleo bruto se extrae en diferentes regiones del mundo, con caracteristicas muy similares pero no identicas. Dos de los principales tipos de petroleo son el de Brent (Europa) y el WTI (EEUU).
+
+
+(a) Descarga el precio ajustado (Adjusted) del Brent (BZ=F) y WTI (CL=F) desde el 1ro de enero del 2010 hasta el 31 de diciembre del 2021 utilizando la funcion getSymbols() del paquete quantmod. Elimina los NAs.
+```{r, message=F, warning=F}
+getSymbols('BZ=F', from="2010-01-01", to= "2021-12-31", src="yahoo")
+getSymbols('CL=F', from="2010-01-01", to= "2021-12-31", src="yahoo")
+
+
+brent <- `BZ=F`[,'BZ=F.Adjusted']
+brent <- na.omit(brent) #Eliminar Na 
+
+wti <- `CL=F`[,'CL=F.Adjusted']
+wti <- na.omit(wti) #Eliminar Na 
+
+```
+
+
+
+(b) Grafica ambas series en un mismo grafico y verifica si se comportan de manera parecida.
+```{r}
+plot(brent, main="BRENT", type = 'l', col = 'blue')
+plot(wti, main="WTI", type = 'l', col = 'red')
+
+```
+
+
+(c) Grafica la funcion de autocorrelacion para cada serie. Interpreta sus resultados.
+```{r}
+acf(brent) # Esta serie no estacionaria
+pacf(brent)
+acf(wti) # Esta serie no estacionaria
+pacf(wti)
+```
+
+
+(d) Aplica el test de Dickey-Fuller Aumentado a ambas series por separado. ¿Cuales son las conclusiones de este test?
+```{r}
+# Test de Dickey-Fuller en BRENT
+Dickey_Fuller_brent <- ur.df(brent, type = 'none', lags = 1)
+summary(Dickey_Fuller_brent)
+
+```
+
+```{r}
+# Test de Dickey-Fuller en WTI
+Dickey_Fuller_wti <- ur.df(wti, type = 'none', lags = 1)
+summary(Dickey_Fuller_wti)
+
+```
+
+Se rechaza en el caso de WTI la hipotesis nula de la no estacionariedad, debido a que el p value es menor que 0.05. En el caso de BRENT, el test revela que sucede lo contrario.
+
+
+(e) Ahora aplica el test de Phillips-Perron. ¿Cuales son las conclusiones de este test?
+```{r}
+phillipsperron_brent <- PP.test(brent)
+phillipsperron_brent
+
+phillipsperron_wti <- PP.test(wti)
+phillipsperron_wti
+
+```
+
+
+En ambos casos el p value es mayor que 5%, por lo que segun este test las series son no estacionarias y de raiz unitaria. 
+
+
+(f) En caso de necesitarlo, transforma las series, y estima un VAR(p) con estas dos series. ¿Crees que este es un modelo apropiado? ¿Por que?
+```{r}
+diff_brent <- diff(brent) #Serie diferenciada
+diff_wti <- diff(wti) #Serie diferenciada
+
+df <- as.data.frame(cbind(diff_brent, diff_wti))
+df <- na.omit(as.matrix(df))
+var <- VAR(df, p = 2, type = 'const')
+summary(var)
+```
+
+
+
+```{r, warning=F, message=F}
+plot(var)
+```
+
+
+Es apropiado el modelo, a pesar de las variaciones bruscas a traves del tiempo que presentan los residuales, pero estas son minimas, causadas por la inestabilidad economica del COVID hacia el 2020. Tambien si vemos en la matriz de covarianza como las no diagonales son distintas de cero, decimos que los errores están correlacionados, lo que hace al modelo mas viable.
+
+
+
+(g) Grafica los errores y verifica si parecen ruido blanco.
+```{r}
+acf(residuals(var)[,1])
+```
+
+Estos residuales parecen tener ruido blando debido a la oscilacion del ACF a lo largo del lag.
+
+(h) ¿Estan correlacionados los errores $e_{1t}$ y $e_{2t}$?
+
+Si, ya que como vimos antes la matriz de covarianza, en las no diagonales, presenta valores distintos de cero. Con esto se dice que los errores de ambas series del modelo estan correlacionados. 
+
+
+(i) Estima un SVAR(p) con el Brent y el WTI, donde el WTI es la variable mas exogena.
+
+Para configurar la matriz para los coeficientes contemporáneos, necesitamos hacer uso de una matriz que tenga las dimensiones adecuadas. Esto se logra fácilmente con la ayuda de la matriz de diagnóstico. Para codificar esto de manera adecuada, necesitamos insertar ceros para las restricciones y NA en todos aquellos lugares que no pertenezcan a una restricción. Por eso,
+```{r, message=F, warning=F}
+a.mat = diag(2)
+diag(a.mat) <- NA
+a.mat[2, 1] <- NA
+
+b.mat <- diag(2)
+diag(b.mat) <- NA
+
+svar <- SVAR(var, Amat = a.mat, Bmat = b.mat, max.iter = 10000,
+             hessian = TRUE) # Dado que el VAR tiene a wti como la segunda variable, esta seria la mas exogena por la naturaleza del SVAR
+svar
+```
+
+(j) Asume que acaba de ocurrir el desafortunado evento de que una de las principales productoras de petroleo a nivel global (market share de mas de 20%) en los EEUU sufrio una explosion. Calcula el efecto a lo largo del tiempo en el precio del Brent como resultado de este choque exogeno en el WTI (el precio del WTI aumento).
+
+
+Como los errores estan correlacionados (matriz cuyas no diagonales son distintos de cero), no podemos aislar el efecto del choque en una variable endogena de las demas variables. En este caso solo hay 2 variables.  
+
+Descubriendo el modelo estructural es lo que llamamos identificación (identificar choques que son puramente exogenos, y proceder a aislarlos mediante el VAR Estructural).
+```{r, message=F, warning=F}
+a.mat = diag(2)
+diag(a.mat) <- NA
+a.mat[2, 1] <- NA
+
+b.mat <- diag(2)
+diag(b.mat) <- NA
+sv=cbind(brent, wti)
+sv<-na.omit(sv)
+colnames(sv) <- cbind("Brent", "WTI")
+
+lagSelect = VARselect(sv, lag.max = 8, type='both') # Select 6 lags
+varmod = VAR(sv, p=6, season=NULL, exog = NULL, type='const')
+svar2 <- SVAR(varmod, Amat = a.mat, Bmat = b.mat, max.iter = 10000, hessian = TRUE, estmethod = c("scoring", "direct"))
+
+
+#IMPULSE RESPONSE FUNCTION
+SVarog = irf(svar2, impulse = 'WTI', response = "Brent") #ver el efecto shock desde WTI hacia Brent
+SVarog
+```
+
+
+```{r}
+summary(varmod)
+```
+
+
+(k) Grafica la evolucion de este choque exogeno en el precio del Brent.
+```{r}
+plot(SVarog)
+```
+
+
+Lo lleva a un escenario de overheating pero luego se estabiliza (Brent), al medir el impacto del choque en Brent, aumentandolo 1 unidad en cada caso.
+
+
+### 6. Proyecta $y_{51}$, $y_{52}$, y $y_{53}$
+
+
+```{r}
+arimamodel <- arima(diff(data$IMAE),
+                    order = c(1,0,1), # componento no estacional
+                    seasonal = list(order=c(1, 0, 1), # componente estacional
+                                    period=12), method = 'ML')
+plot(resid(arimamodel), main="Plot de residuales")
+
+```
+
+![Problema 6.](6_final.jpg)
+
+
+
+
+
+
+
