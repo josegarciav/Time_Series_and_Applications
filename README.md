@@ -13,7 +13,12 @@ The Time Series and Applications course provided a comprehensive introduction to
 * Moving Average (MA) Models
 * Autoregressive Integrated Moving Average (ARIMA) Models
 * Seasonal Decomposition of Time Series (STL)
-* Exponential Smoothing State Space Model (ETS)
-* SARIMA and SVAR Models
-* Model Evaluation and Selection
+* Volatility models, ARCH, GARCH, impulse-response models
+* State Space Model & Kalman filters
+* Factor-Augmented VAR (FAVAR) model
+* SVAR Models
+* Model tests, evaluation and selection
 
+# Acknowledgments
+
+University Name: Instituto Tecnológico de Santo Domingo (INTEC)
